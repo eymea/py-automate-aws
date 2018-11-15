@@ -1,6 +1,8 @@
 import boto3
 import click
+import mimetypes
 from botocore.exceptions import ClientError
+from pathlib import Path
 
 session = boto3.Session(profile_name='myPythonAutomation')
 s3 = session.resource('s3')
@@ -78,6 +80,44 @@ def setup_bucket(bucket):
     })
 
     return
+
+def upload_file(s3_bucket, path, key):
+    "Use the file ext to guess file type or default to text/plain"
+    content_type = mimetypes.guess_type(key)[0] or 'text/plain'
+    s3_bucket.upload_file(
+        path,
+        key,
+        ExtraArgs={
+            'ContentType': content_type
+        })
+
+@cli.command('sync')
+# Use click helper function to ensure pathname exists
+@click.argument('pathname', type=click.Path(exists=True))
+# Click path exists doesn't check ~ properly in Windows
+# @click.argument('pathname')
+@click.argument('bucket')
+def sync(pathname, bucket):
+    "Sync contents of PATHNAME to BUCKET"
+    s3_bucket = s3.Bucket(bucket)
+
+    # root is the pathname provided
+    # expanduser and resolve will convert ~/ (home) to full user path
+    root = Path(pathname).expanduser().resolve()
+
+    # Loop via target and extract all the files
+    # The for loop will call handle_directory repeatedly until all the files
+    # are found
+    def handle_directory(target):
+        for p in target.iterdir():
+            if p.is_dir(): handle_directory(p)
+            if p.is_file():
+                "For Windows convert Key and Path to Posix before upload"
+                print("Uploading {} from {}".format(p.relative_to(root).as_posix(),p))
+                upload_file(s3_bucket, p.as_posix(), p.relative_to(root).as_posix())
+
+    # Call a function within it
+    handle_directory(root)
 
 if __name__ == '__main__':
     cli()
