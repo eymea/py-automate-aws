@@ -11,16 +11,13 @@ Webotron automates the process of deploying static websites to AWS.
 - Configure DNS with AWS Route 53
 - Configure a Content Delivery Network and SSL with AWS CloudFront
 """
-
-from pathlib import Path
-import mimetypes
-
 import boto3
-from botocore.exceptions import ClientError
 import click
 
+from bucket import BucketManager
+
 session = boto3.Session(profile_name='myPythonAutomation')
-s3 = session.resource('s3')
+bucket_manager = BucketManager(session)
 
 
 @click.group()
@@ -32,7 +29,7 @@ def cli():
 @cli.command('list-buckets')
 def list_buckets():
     """List all s3 buckets."""
-    for bucket in s3.buckets.all():
+    for bucket in bucket_manager.all_buckets():
         print(bucket)
 
 
@@ -40,7 +37,7 @@ def list_buckets():
 @click.argument('bucket')
 def list_bucket_objects(bucket):
     """List objects in an S3 bucket."""
-    for obj in s3.Bucket(bucket).objects.all():
+    for obj in bucket_manager.all_objects(bucket):
         print(obj)
 
 
@@ -48,70 +45,11 @@ def list_bucket_objects(bucket):
 @click.argument('bucket')
 def setup_bucket(bucket):
     """Create and configure S3 bucket."""
-    s3_bucket = None
-
-    try:
-        s3_bucket = s3.create_bucket(
-            Bucket=bucket,
-            CreateBucketConfiguration={
-                'LocationConstraint': session.region_name
-            }
-        )
-    except ClientError as error:
-        # IF bucket already exist, just assign it to s3_bucket.
-        if error.response['Error']['Code'] == 'BucketAlreadyOwnedByYou':
-            s3_bucket = s3.Bucket(bucket)
-        else:
-            raise error
-
-    s3_bucket.upload_file(
-        'index.html',
-        'index.html',
-        ExtraArgs={'ContentType': 'text/html'})
-
-    policy = """
-    {
-      "Version":"2012-10-17",
-      "Statement":[{
-      "Sid":"PublicReadGetObject",
-      "Effect":"Allow",
-      "Principal": "*",
-          "Action":["s3:GetObject"],
-          "Resource":["arn:aws:s3:::%s/*"
-          ]
-        }
-      ]
-    }
-    """ % s3_bucket.name
-
-    # Strip blank,CR, LF from begin or end of string.
-    policy = policy.strip()
-
-    pol = s3_bucket.Policy()
-    pol.put(Policy=policy)
-
-    s3_bucket.WebSite().put(WebsiteConfiguration={
-        'ErrorDocument': {
-            'Key': 'error.html'
-        },
-        'IndexDocument': {
-            'Suffix': 'index.html'
-        }
-    })
+    s3_bucket = bucket_manager.init_bucket(bucket)
+    bucket_manager.set_policy(s3_bucket)
+    bucket_manager.configure_website(s3_bucket)
 
     return
-
-
-def upload_file(s3_bucket, path, key):
-    """Upload path to s3 bucket at key."""
-    # Use the file ext to guess file type or default to text/plain.
-    content_type = mimetypes.guess_type(key)[0] or 'text/plain'
-    s3_bucket.upload_file(
-        path,
-        key,
-        ExtraArgs={
-            'ContentType': content_type
-        })
 
 
 @cli.command('sync')
@@ -122,28 +60,7 @@ def upload_file(s3_bucket, path, key):
 @click.argument('bucket')
 def sync(pathname, bucket):
     """Sync contents of PATHNAME to BUCKET."""
-    s3_bucket = s3.Bucket(bucket)
-
-    # root is the pathname provided.
-    # expanduser and resolve will convert ~/ (home) to full user path
-    root = Path(pathname).expanduser().resolve()
-
-    # Loop via target and extract all the files.
-    # The for loop will call handle_directory repeatedly until all the files
-    # are found.
-    def handle_directory(target):
-        for p in target.iterdir():
-            if p.is_dir():
-                handle_directory(p)
-            if p.is_file():
-                # For Win convert Key and Path to Posix before upload.
-                print("Uploading {} from {}".
-                      format(p.relative_to(root).as_posix(), p))
-                upload_file(s3_bucket,
-                            p.as_posix(), p.relative_to(root).as_posix())
-
-    # Call a function within it.
-    handle_directory(root)
+    bucket_manager.sync(pathname, bucket)
 
 
 if __name__ == '__main__':
