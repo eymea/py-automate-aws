@@ -16,3 +16,4 @@ Webotron currently has the following features:
 - Create and set up a bucket
 - Sync directory tree to bucket
 - Set AWS profile with --profile=<profileName>
+- Configure route 53 domain
