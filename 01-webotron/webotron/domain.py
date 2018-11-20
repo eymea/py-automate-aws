@@ -26,7 +26,6 @@ class DomainManager:
 
         return None
 
-
     # domain_name = 'subdomain.kittentest.automatingaws.net'
     # zone_name = 'automatingaws.net.'
     def created_hosted_zone(self, domain_name):
@@ -57,6 +56,30 @@ class DomainManager:
                         'AliasTarget': {
                             'HostedZoneId': endpoint.zone,
                             'DNSName': endpoint.host,
+                            'EvaluateTargetHealth': False
+                        }
+                    }
+                }
+                ]
+            }
+        )
+
+    def create_cf_domain_record(self, zone, domain_name, cf_domain):
+        """Create a domain record in zone for domain_name."""
+        return self.client.change_resource_record_sets(
+            HostedZoneId=zone['Id'],
+            ChangeBatch={
+                'Comment': 'Created by webotron',
+                'Changes': [{
+                    'Action': 'UPSERT',
+                    'ResourceRecordSet': {
+                        'Name': domain_name,
+                        'Type': 'A',
+                        'AliasTarget': {
+                            # HostedZoneId = Z2FDTNDATAQYW2
+                            # for all CloudFront Dist
+                            'HostedZoneId': 'Z2FDTNDATAQYW2',
+                            'DNSName': cf_domain,
                             'EvaluateTargetHealth': False
                         }
                     }
